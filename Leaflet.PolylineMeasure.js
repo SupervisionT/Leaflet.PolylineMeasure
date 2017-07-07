@@ -28,6 +28,7 @@
 		 * @type {Object}
 		 */
 		options: {
+      mestype: false,
 			/**
 			 * Position to show the control. Possible values are: 'topright', 'topleft', 'bottomright', 'bottomleft'
 			 * @type {String}
@@ -298,8 +299,11 @@
 			if (label.indexOf('&') !== -1) {
 				classes.push(_unicodeClass);
 			}
-			self._measureControl = self._createControl(label, title, classes, self._container, self._toggleMeasure, self);
-			self._measureControl.setAttribute('id', _measureControlId);
+			self._measureControl = self._createControl('GC', 'Great-circle distance', ['Measure_1'], self._container, self._toggleMeasure, self);
+      self._measureControl2 = self._createControl('RL', 'Rhumb-line distance', ['Measure_2'], self._container, self._toggleMeasure2, self);
+      self._measureControl.setAttribute('id', 'Ho');
+      self._measureControl2.setAttribute('id', 'Do');
+
 			if (self.options.showMeasurementsClearControl) {
 				title = self.options.clearControlTitle;
                 label = self.options.clearControlLabel;
@@ -349,11 +353,27 @@
 		 */
 		_toggleMeasure: function () {
 		    // if measuring being switched on
-            if (this._measuring) {
-				this._disableMeasure();
+            if (this._measuring && this.options.mestype) {
+      				this._disableMeasure(this._measureControl.id);
 			// if measuring being switched off
             } else {
-				this._enableMeasure();
+              // this._measuring = false;
+              this._disableMeasure(this._measureControl2.id);
+      				this._enableMeasure(this._measureControl.id);
+              this._changeMesurmentMethod();
+			}
+			this.fire("toggle", {status: this._measuring});
+		},
+    _toggleMeasure2: function () {
+		    // if measuring being switched on
+            if (this._measuring && !this.options.mestype) {
+				    this._disableMeasure(this._measureControl2.id);
+			// if measuring being switched off
+            } else {
+              // this._measuring = false;
+              this._disableMeasure(this._measureControl.id);
+      				this._enableMeasure(this._measureControl2.id);
+              this._changeMesurmentMethod();
 			}
 			this.fire("toggle", {status: this._measuring});
 		},
@@ -362,11 +382,20 @@
          * Enable the measure functionality
          * @private
          */
-        _enableMeasure: function () {
+        _enableMeasure: function (xxx) {
 			if (this._measuring) { return; }
 			var self = this;
             self._measuring = true;
-            self._measureControl.style.backgroundColor = self.options.backgroundColor;
+            if (xxx == 'Do'){
+              self._measureControl2.style.backgroundColor = self.options.backgroundColor;
+              self.options.mestype = false;
+              self._measureControl.removeAttribute('style');
+            } else {
+              self._measureControl.style.backgroundColor = self.options.backgroundColor;
+              self.options.mestype = true;
+              // this._changeMesurmentMethod();
+              self._measureControl2.removeAttribute('style');
+            }
             self._oldCursor = self._map._container.style.cursor;          // save former cursor type
             self._map._container.style.cursor = self.options.cursor;
             self._doubleClickZoom = self._map.doubleClickZoom.enabled();  // save former status of doubleClickZoom
@@ -392,11 +421,15 @@
          * Disable the measure functionality
          * @private
          */
-		_disableMeasure: function () {
+		_disableMeasure: function (yyy) {
 			if (!this._measuring) { return; }
             var self = this;
             self._measuring = false;
-            self._measureControl.removeAttribute('style');
+            if (yyy == 'Do'){
+              self._measureControl2.removeAttribute('style');
+            } else {
+              self._measureControl.removeAttribute('style');
+            }
             self._map._container.style.cursor = self._oldCursor;
             self._map.off ('mousemove', self._mouseMove, self);
             self._map.off ('click', self._mouseClick, self);
@@ -441,13 +474,46 @@
 			if(e.keyCode === 27) {
 				// if NOT drawing a line (= there's no currentCircle)
 				if(!self._currentCircle) {
-                    self._toggleMeasure();
+                    if (self.options.mestype){
+                      self._toggleMeasure();
+                    } else {
+                      self._toggleMeasure2();
+                    }
 				} else {
 					self._finishPath(e);
 				}
 			}
 		},
 
+    _greatCircle: function(lat1, lon1, lat2, lon2){
+      var R = 6371e3; // metres
+      var φ1 = lat1 * Math.PI / 180;
+      var φ2 = lat2 * Math.PI / 180;
+      var Δφ = (lat2-lat1) * Math.PI / 180;
+      var Δλ = (lon2-lon1) * Math.PI / 180;
+      var a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+              Math.cos(φ1) * Math.cos(φ2) *
+              Math.sin(Δλ/2) * Math.sin(Δλ/2);
+      var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+
+      var d = R * c;
+      return d
+    },
+    _rhumb: function(lat1, lon1, lat2, lon2){
+      var R = 6371e3; // metres
+      var φ1 = lat1 * Math.PI / 180;
+      var φ2 = lat2 * Math.PI / 180;
+      var Δφ = (lat2-lat1) * Math.PI / 180;
+      var Δλ = (lon2-lon1) * Math.PI / 180;
+      var Δψ = Math.log(Math.tan(Math.PI/4+φ2/2)/Math.tan(Math.PI/4+φ1/2));
+      var q = Math.abs(Δψ) > 10e-12 ? Δφ/Δψ : Math.cos(φ1); // E-W course becomes ill-conditioned with 0/0
+
+      // if dLon over 180° take shorter rhumb line across the anti-meridian:
+      if (Math.abs(Δλ) > Math.PI) Δλ = Δλ>0 ? -(2*Math.PI-Δλ) : (2*Math.PI+Δλ);
+
+      var dist = Math.sqrt(Δφ*Δφ + q*q*Δλ*Δλ) * R;
+      return dist;
+    },
         /**
          * Get the distance in the format specified in the options
          * @param {Number} distance Distance to convert
@@ -504,7 +570,7 @@
 			}
 			self._tooltip._icon.innerHTML = text;
 		},
-        
+
 		/**
 		 * Event to fire on mouse move
 		 * @param {Object} e Event
@@ -518,7 +584,12 @@
 			}
             self._tempLine.setLatLngs ([self._currentCircleCoords, e.latlng]);
             self._tooltip.setLatLng(e.latlng);
-            var distance = e.latlng.distanceTo (self._currentCircleCoords);
+            // var distance = e.latlng.distanceTo (self._currentCircleCoords);
+            if (self.options.mestype){
+              var distance = self._greatCircle(e.latlng.lat, e.latlng.lng, self._currentCircleCoords.lat, self._currentCircleCoords.lng);
+            } else {
+              var distance = self._rhumb(e.latlng.lat, e.latlng.lng, self._currentCircleCoords.lat, self._currentCircleCoords.lng);
+            }
             self._updateTooltipDistance (self._distance + distance, distance);
 			self.fire("move", {length: distance, distance: self._distance + distance});
 		},
@@ -549,7 +620,13 @@
 
             if (self._currentCircle) {
 				self._tooltip.setLatLng (e.latlng);
-				var distance = e.latlng.distanceTo (self._currentCircleCoords);
+				// var distance = e.latlng.distanceTo (self._currentCircleCoords);
+        if (self.options.mestype){
+          var distance = self._greatCircle(e.latlng.lat, e.latlng.lng, self._currentCircleCoords.lat, self._currentCircleCoords.lng);
+        } else {
+          var distance = self._rhumb(e.latlng.lat, e.latlng.lng, self._currentCircleCoords.lat, self._currentCircleCoords.lng);
+        }
+
 				self._updateTooltipDistance (self._distance + distance, distance);
                 self._arrTooltipsCurrentline.push (self._tooltip);
                 self._distance += distance;
@@ -574,6 +651,7 @@
                     radius: circleStyle.radius
                 });
                 self._currentCircle.on ('mousedown', self._dragCircle, self);
+
 				self.fire("path", {distance: self._distance, length: distance});
 			}
 
@@ -656,20 +734,44 @@
 			self._tempLine = undefined;
             self._arrTooltipsCurrentline = [null];   // assign "null" to 1st element of array, cause there's no tooltip for 1st Circle
 		},
-      
+
+        _changeMesurmentMethod: function() {
+            var self = this;
+            if (self._arrFixedLines.length > 0) {
+              self._arrFixedLines.map((item, index1) => {
+                var lineCoords = item.getLatLngs();  // get Coords of each Point of the current Polyline
+                lineCoords.map ((item, index) => {
+                    if (index >= 1)  {
+                        self._tooltip = self._arrTooltips[index1][index];
+                        if (self.options.mestype){
+                          var distance = self._greatCircle(lineCoords[index-1].lat, lineCoords[index-1].lng, lineCoords[index].lat, lineCoords[index].lng);
+                        } else {
+                          var distance = self._rhumb(lineCoords[index-1].lat, lineCoords[index-1].lng, lineCoords[index].lat, lineCoords[index].lng);
+                        }
+                        // var distance = lineCoords[index].distanceTo (lineCoords[index-1]);
+                        self._updateTooltipDistance(self._distance + distance, distance);
+                        self._distance += distance;
+                    }
+                });
+                self._distance = 0;
+              }
+            )}
+        },
+
         _dragCircle: function (e1) {
             var self = this;
             if ((self._measuring) && (self._cntCircle === 0)) {    // just execute drag-function if Measuring tool is active but no line is being drawn at the moment.
-            
+
             self._map.dragging.disable();  // turn of moving of the map during drag of a circle
             self._map.off ('mousemove', self._mouseMove, self);
             self._map.off ('click', self._mouseClick, self);
-            
+
             var mouseStartingLat = e1.latlng.lat;
             var mouseStartingLng = e1.latlng.lng;
             var circleStartingLat = e1.target._latlng.lat;
             var circleStartingLng = e1.target._latlng.lng;
             self._map.on ('mousemove', function (e2) {
+
                 var mouseNewLat = e2.latlng.lat;
                 var mouseNewLng = e2.latlng.lng;
                 var latDifference = mouseNewLat - mouseStartingLat;
@@ -681,23 +783,28 @@
                 var lineCoords = self._arrFixedLines[lineNr].getLatLngs();  // get Coords of each Point of the current Polyline
                 lineCoords [circleNr] = currentCircleCoords;
                 self._arrFixedLines[lineNr].setLatLngs (lineCoords);
-                
+
                 if (circleNr >= 1) {     // just update tooltip position of 2nd, 3rd, 4th etc. Circle of a line
                     self._tooltip = self._arrTooltips[lineNr][circleNr];
                     self._tooltip.setLatLng(currentCircleCoords);
-                }    
+                }
                 self._distance = 0;
                 // update tooltip texts of each tooltip but not tooltip of 1st Circle (which doesnt't have a tooltip)
-                lineCoords.map (function (item, index) {    
+                lineCoords.map ((item, index) => {
                     if (index >= 1)  {
                         self._tooltip = self._arrTooltips[lineNr][index];
-                        var distance = lineCoords[index].distanceTo (lineCoords[index-1]);
+                        if (self.options.mestype){
+                          var distance = self._greatCircle(lineCoords[index-1].lat, lineCoords[index-1].lng, lineCoords[index].lat, lineCoords[index].lng);
+                        } else {
+                          var distance = self._rhumb(lineCoords[index-1].lat, lineCoords[index-1].lng, lineCoords[index].lat, lineCoords[index].lng);
+                        }
+                        // var distance = lineCoords[index].distanceTo (lineCoords[index-1]);
                         self._updateTooltipDistance(self._distance + distance, distance);
                         self._distance += distance;
                     }
                 });
-                
-                self._map.on ('mouseup', function () { 
+
+                self._map.on ('mouseup', function () {
                     self._resetPathVariables();
                     self._map.off ('mousemove');
                     self._map.dragging.enable();
